@@ -161,7 +161,31 @@ module YamlDb
       end
 
       def self.tables
-        ActiveRecord::Base.connection.tables.reject { |table| ['schema_info', 'schema_migrations'].include?(table) }.sort
+        complex = {}
+        order = []
+        Rails.application.eager_load!
+        names = Hash[ActiveRecord::Base.descendants.map {|k| [k.table_name, k.to_s] }]
+        ActiveRecord::Base.connection.tables.reject {|table| %w(schema_info schema_migrations).include?(table) }.each do |table|
+          klass = names[table].presence || table.classify
+          if defined?(klass) && klass.safe_constantize && klass.safe_constantize.ancestors.include?(ActiveRecord::Base)
+            assocs = klass.constantize.reflect_on_all_associations(:belongs_to)
+                          .select {|t| !t.options[:polymorphic] }.map do |s|
+              s.class_name.safe_constantize&.table_name
+            end.compact
+            complex[table] = assocs
+          else
+            order.push table
+          end
+        end
+        while complex.keys.count.positive?
+          complex.each do |k, v|
+            if (v - order).empty?
+              order.push k
+              complex.delete k
+            end
+          end
+        end
+        order
       end
 
       def self.dump_table(io, table)
