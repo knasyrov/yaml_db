@@ -160,32 +160,35 @@ module YamlDb
 
       end
 
-      def self.tables
-        complex = {}
-        order = []
+      def self.klasses
         Rails.application.eager_load!
-        names = Hash[ActiveRecord::Base.descendants.map {|k| [k.table_name, k.to_s] }]
-        ActiveRecord::Base.connection.tables.reject {|table| %w(schema_info schema_migrations).include?(table) }.each do |table|
-          klass = names[table].presence || table.classify
-          if defined?(klass) && klass.safe_constantize && klass.safe_constantize.ancestors.include?(ActiveRecord::Base)
-            assocs = klass.constantize.reflect_on_all_associations(:belongs_to)
-                          .select {|t| !t.options[:polymorphic] }.map do |s|
-              s.class_name.safe_constantize&.table_name
-            end.compact
-            complex[table] = assocs
-          else
-            order.push table
-          end
-        end
-        while complex.keys.count.positive?
-          complex.each do |k, v|
-            if (v - order).empty?
-              order.push k
-              complex.delete k
+        Hash[ActiveRecord::Base.descendants
+                               .map {|klass| [klass.to_s, klass.table_name] }
+                               .group_by {|g| g[1] }
+                               .map {|k, v| [k, v.first.first] }]
+      end
+
+      def self.raw_tables
+        ActiveRecord::Base.connection.tables.reject {|table| %w(schema_info schema_migrations).include?(table) }
+      end
+
+      def self.tables
+        ordered_tables = raw_tables - klasses.keys
+        rels = klasses.map do |table, klass|
+          assocs = klass.constantize.reflect_on_all_associations(:belongs_to).select {|t| !t.options[:polymorphic] }.map do |s|
+            s.class_name.safe_constantize&.table_name
+          end.compact.uniq
+          [table, assocs]
+        end.to_h
+        while rels.keys.count.positive?
+          rels.each do |table, assocs|
+            if (assocs - ordered_tables).empty?
+              ordered_tables.push table
+              rels.delete table
             end
           end
         end
-        order
+        ordered_tables
       end
 
       def self.dump_table(io, table)
