@@ -37,11 +37,10 @@ module YamlDb
       end
 
       def load_from_dir(dirname, truncate = true)
-        Dir.entries(dirname).each do |filename|
-          if filename =~ /^[.]/
-            next
-          end
-          @loader.load(File.new("#{dirname}/#{filename}", "r"), truncate)
+        entries = Hash[Dir.entries(dirname).map{|entry| [entry.sub(/\.[^.]+\z/, ''), entry] }]
+        tables = @dumper.tables
+        (tables & entries.keys).each do |table|
+          @loader.load(File.new("#{dirname}/#{entries[table]}", "r"), truncate)
         end
       end
 
